@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sheet Updater — Inbox Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script>
+  (function(){
+    var t = localStorage.getItem('su_theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
+<style>
+  :root[data-theme='dark']{--bg:#10151f;--panel:#1a2233;--panel2:#202b40;--line:#2a3550;--text:#e9edf6;--muted:#9aa6c2;--accent:#5b8dee;--accent2:#7fe3b4;--shadow:0 1px 3px rgba(0,0,0,.3);--row-hover:#212c46;}
+  :root[data-theme='light']{--bg:#f4f6fb;--panel:#ffffff;--panel2:#f0f3fa;--line:#e2e7f0;--text:#252b3a;--muted:#69738f;--accent:#3f6fe0;--accent2:#149a72;--shadow:0 1px 3px rgba(30,41,59,.08);--row-hover:#eef1f9;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:10px;padding:16px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5;flex-wrap:wrap}
+  header h1{font-size:19px;margin:0;font-weight:700;flex:1}
+  button{background:var(--accent);color:#fff;border:none;padding:9px 15px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;box-shadow:var(--shadow)}
+  button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button.reject{background:transparent;border:1px solid var(--line);color:var(--muted)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .wrap{padding:20px 22px;max-width:1300px;margin:0 auto}
+  .status{color:var(--muted);font-size:14px}
+  .tablewrap{overflow:auto;border-radius:14px;box-shadow:var(--shadow);border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:14.5px;background:var(--panel)}
+  th,td{padding:11px 13px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel2);font-size:13px;text-transform:uppercase;letter-spacing:.03em}
+  tr:hover td{background:var(--row-hover)}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted)}
+  .vendor{color:var(--accent2);font-weight:500}
+  .rowActions button{margin-right:6px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect} = React;
+
+function App(){
+  const [pending,setPending] = useState([]);
+  const [autoApply,setAutoApply] = useState(false);
+  const [busyId,setBusyId] = useState(null);
+  const [scanning,setScanning] = useState(false);
+  const [theme,setTheme] = useState(()=>document.documentElement.getAttribute('data-theme')||'dark');
+
+  function toggleTheme(){
+    const next = theme==='dark' ? 'light' : 'dark';
+    setTheme(next); document.documentElement.setAttribute('data-theme', next); localStorage.setItem('su_theme', next);
+  }
+
+  async function load(){
+    const r = await fetch('/api/pending'); const j = await r.json();
+    if(j.ok){ setPending(j.rows||[]); setAutoApply(j.autoApply); }
+  }
+  useEffect(()=>{ load(); const iv=setInterval(load, 5*60*1000); return ()=>clearInterval(iv); }, []);
+
+  async function act(id, verb){
+    setBusyId(id);
+    try{ await fetch(`/api/pending/${id}/${verb}`, {method:'POST'}); await load(); }
+    finally{ setBusyId(null); }
+  }
+
+  async function scanNow(){
+    setScanning(true);
+    try{ await fetch('/api/scan-now', {method:'POST'}); await load(); }
+    finally{ setScanning(false); }
+  }
+
+  return (
+    <React.Fragment>
+      <header>
+        <h1>📥 Sheet Updater — Inbox Review</h1>
+        <span className="status">{autoApply ? 'Auto-apply is ON' : `${pending.length} pending`}</span>
+        <button className="ghost" onClick={toggleTheme}>{theme==='dark'?'☀️':'🌙'}</button>
+        <button onClick={scanNow} disabled={scanning}>Scan inbox now</button>
+      </header>
+      <div className="wrap">
+        {autoApply ? (
+          <div className="empty">Auto-apply is ON — detected emails update the sheet directly, nothing to review here.</div>
+        ) : pending.length===0 ? (
+          <div className="empty">No pending rate emails to review.</div>
+        ) : (
+          <div className="tablewrap">
+            <table>
+              <thead><tr><th>Country</th><th>MCC</th><th>MNC</th><th>Rate</th><th>Bind</th><th>Operator</th><th>Date</th><th>Vendor</th><th>Source</th><th>Actions</th></tr></thead>
+              <tbody>
+                {pending.map(p=>(
+                  <tr key={p.id}>
+                    <td>{p.country}</td><td>{p.mcc}</td><td>{p.mnc}</td><td>{p.rate}</td>
+                    <td>{p.bind}</td><td>{p.operator}</td><td>{p.date}</td><td className="vendor">{p.vendor}</td>
+                    <td style={{whiteSpace:'normal',maxWidth:260}}>{p.source}</td>
+                    <td className="rowActions">
+                      <button disabled={busyId===p.id} onClick={()=>act(p.id,'approve')}>Approve</button>
+                      <button className="reject" disabled={busyId===p.id} onClick={()=>act(p.id,'reject')}>Reject</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </React.Fragment>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
