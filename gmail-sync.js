@@ -154,4 +154,4 @@ async function scanInbox(oauth2Client) {
   return candidates;
 }
 
-module.exports = { scanInbox };
+module.exports = { scanInbox, parseAttachmentBuffer };

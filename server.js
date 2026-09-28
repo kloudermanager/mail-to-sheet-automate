@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
 const { google } = require('googleapis');
-const { scanInbox } = require('./gmail-sync');
+const { scanInbox, parseAttachmentBuffer } = require('./gmail-sync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,7 +24,7 @@ function checkAuth(req, res, next) {
 }
 app.use(checkAuth);
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 // ---------- Shared Google auth (Sheets write + Gmail) ----------
 function getOAuthClient() {
@@ -153,6 +153,32 @@ app.post('/api/pending/:id/reject', async (req, res) => {
 app.post('/api/scan-now', async (req, res) => {
   try { await runEmailScan(); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ---------- Manual import (CSV / XLSX upload) ----------
+app.get('/api/tabs', async (req, res) => {
+  try {
+    const meta = await getSheets().spreadsheets.get({ spreadsheetId: process.env.SHEET_ID, fields: 'sheets.properties.title' });
+    res.json({ ok: true, tabs: meta.data.sheets.map(s => s.properties.title).filter(t => t !== PENDING_TAB) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.post('/api/import', async (req, res) => {
+  try {
+    const { vendor, filename, data } = req.body || {};
+    const name = (vendor || '').trim();
+    if (!name || /[\[\]:*?\/\\]/.test(name) || name.length > 100) {
+      return res.status(400).json({ ok: false, error: 'Enter a valid company / tab name (no [ ] : * ? / \\).' });
+    }
+    if (!data) return res.status(400).json({ ok: false, error: 'No file received.' });
+    const rows = parseAttachmentBuffer(Buffer.from(data, 'base64'));
+    if (rows.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No rate rows found. The first row must be a header containing at least Country and Rate columns.' });
+    }
+    await applyCandidatesDirectly(rows.map(r => ({ ...r, vendor: name })));
+    console.log(`[import] ${rows.length} rows from ${filename} into "${name}"`);
+    res.json({ ok: true, count: rows.length });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Inbox scan every morning at 5:30 AM Bangladesh time (Asia/Dhaka, UTC+6).
