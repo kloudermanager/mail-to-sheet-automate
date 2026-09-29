@@ -112,6 +112,52 @@ function ImportCard(){
   );
 }
 
+function AddItemCard({onAdded}){
+  const [tabs,setTabs] = useState([]);
+  const [form,setForm] = useState({vendor:'',country:'',mcc:'',mnc:'',rate:'',bind:'',operator:'',date:''});
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg] = useState(null);
+
+  useEffect(()=>{ fetch('/api/tabs').then(r=>r.json()).then(j=>{ if(j.ok) setTabs(j.tabs); }).catch(()=>{}); }, []);
+  function set(k,v){ setForm(f=>({...f,[k]:v})); }
+
+  async function submit(){
+    setBusy(true); setMsg(null);
+    try{
+      const r = await fetch('/api/add-item', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form)});
+      const j = await r.json();
+      if(!j.ok) throw new Error(j.error);
+      setMsg({ok:true, text:`Added ${form.country} to "${form.vendor.trim()}".`});
+      setForm(f=>({...f, country:'',mcc:'',mnc:'',rate:'',bind:'',operator:'',date:''}));
+      fetch('/api/tabs').then(r=>r.json()).then(j=>{ if(j.ok) setTabs(j.tabs); });
+      onAdded && onAdded();
+    }catch(e){ setMsg({ok:false, text:e.message}); }
+    setBusy(false);
+  }
+
+  const canSubmit = form.vendor.trim() && form.country.trim() && String(form.rate).trim() && !busy;
+
+  return (
+    <div className="card">
+      <h2>Add a single rate</h2>
+      <p>Add one destination straight to a company's tab, no file needed. A new tab is created if the company doesn't exist yet.</p>
+      <div className="importRow">
+        <input type="text" list="tabList2" value={form.vendor} onChange={e=>set('vendor',e.target.value)} placeholder="Company / tab name" />
+        <datalist id="tabList2">{tabs.map(t=><option key={t} value={t} />)}</datalist>
+        <input type="text" value={form.country} onChange={e=>set('country',e.target.value)} placeholder="Country / Destination" />
+        <input type="text" value={form.mcc} onChange={e=>set('mcc',e.target.value)} placeholder="MCC" style={{minWidth:90}} />
+        <input type="text" value={form.mnc} onChange={e=>set('mnc',e.target.value)} placeholder="MNC" style={{minWidth:90}} />
+        <input type="text" value={form.rate} onChange={e=>set('rate',e.target.value)} placeholder="Rate" style={{minWidth:110}} />
+        <input type="text" value={form.bind} onChange={e=>set('bind',e.target.value)} placeholder="Bind" style={{minWidth:110}} />
+        <input type="text" value={form.operator} onChange={e=>set('operator',e.target.value)} placeholder="Operator" />
+        <input type="text" value={form.date} onChange={e=>set('date',e.target.value)} placeholder="Update date (blank = today)" style={{minWidth:200}} />
+        <button onClick={submit} disabled={!canSubmit}>{busy ? 'Adding...' : 'Add'}</button>
+      </div>
+      {msg && <div className={"msg "+(msg.ok?'ok':'err')}>{msg.text}</div>}
+    </div>
+  );
+}
+
 function App(){
   const [pending,setPending] = useState([]);
   const [autoApply,setAutoApply] = useState(false);
@@ -154,6 +200,7 @@ function App(){
       </header>
       <div className="wrap">
         <ImportCard />
+        <AddItemCard />
         {autoApply ? (
           <div className="empty">Auto-apply is ON — detected emails update the sheet directly, nothing to review here.</div>
         ) : pending.length===0 ? (

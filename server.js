@@ -181,6 +181,26 @@ app.post('/api/import', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: e.message }); }
 });
 
+app.post('/api/add-item', async (req, res) => {
+  try {
+    const { vendor, country, mcc, mnc, rate, bind, operator, date } = req.body || {};
+    const name = (vendor || '').trim();
+    if (!name || /[\[\]:*?\/\\]/.test(name) || name.length > 100) {
+      return res.status(400).json({ ok: false, error: 'Enter a valid company / tab name (no [ ] : * ? / \\).' });
+    }
+    if (!country || !String(country).trim()) return res.status(400).json({ ok: false, error: 'Country is required.' });
+    if (rate === undefined || rate === null || String(rate).trim() === '') return res.status(400).json({ ok: false, error: 'Rate is required.' });
+    const row = {
+      country: String(country).trim(), mcc: (mcc || '').toString().trim(), mnc: (mnc || '').toString().trim(),
+      rate: String(rate).trim(), bind: (bind || '').toString().trim(), operator: (operator || '').toString().trim(),
+      date: (date && String(date).trim()) || new Date().toISOString().slice(0, 10), vendor: name,
+    };
+    await applyCandidatesDirectly([row]);
+    console.log(`[add-item] 1 row into "${name}" (${row.country})`);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Inbox scan every morning at 5:30 AM Bangladesh time (Asia/Dhaka, UTC+6).
 cron.schedule('30 5 * * *', () => { runEmailScan().catch(console.error); }, { timezone: 'Asia/Dhaka' });
 
