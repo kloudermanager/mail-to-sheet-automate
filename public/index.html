@@ -163,6 +163,7 @@ function App(){
   const [autoApply,setAutoApply] = useState(false);
   const [busyId,setBusyId] = useState(null);
   const [scanning,setScanning] = useState(false);
+  const [scanError,setScanError] = useState('');
   const [theme,setTheme] = useState(()=>document.documentElement.getAttribute('data-theme')||'dark');
 
   function toggleTheme(){
@@ -183,8 +184,13 @@ function App(){
   }
 
   async function scanNow(){
-    setScanning(true);
-    try{ await fetch('/api/scan-now', {method:'POST'}); await load(); }
+    setScanning(true); setScanError('');
+    try{
+      const r = await fetch('/api/scan-now', {method:'POST'});
+      const j = await r.json();
+      if(!r.ok || !j.ok) throw new Error(j.error || `Scan failed (${r.status})`);
+      await load();
+    }catch(e){ setScanError(e.message || 'Inbox scan failed.'); }
     finally{ setScanning(false); }
   }
 
@@ -197,6 +203,7 @@ function App(){
           {theme==='dark' ? <SunIcon /> : <MoonIcon />}
         </button>
         <button onClick={scanNow} disabled={scanning}>{scanning ? 'Scanning...' : 'Scan inbox now'}</button>
+        {scanError && <span className="msg err" role="alert">{scanError}</span>}
       </header>
       <div className="wrap">
         <ImportCard />

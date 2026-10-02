@@ -152,7 +152,7 @@ app.post('/api/pending/:id/reject', async (req, res) => {
 });
 app.post('/api/scan-now', async (req, res) => {
   try { await runEmailScan(); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  catch (e) { console.error('[scan-now] failed:', e); res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // ---------- Manual import (CSV / XLSX upload) ----------
