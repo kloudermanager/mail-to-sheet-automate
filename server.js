@@ -118,6 +118,29 @@ async function removePendingRowById(id) {
   return true;
 }
 
+async function removePendingRowsByIds(ids) {
+  if (ids.length === 0) return 0;
+  const sheets = getSheets();
+  const sheetId = process.env.SHEET_ID;
+  const tabId = await ensurePendingTab(sheets, sheetId);
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: `'${PENDING_TAB}'!A2:A` });
+  const selectedIds = new Set(ids);
+  const rowIndexes = (res.data.values || [])
+    .map((row, index) => selectedIds.has(row[0]) ? index + 1 : -1)
+    .filter(index => index !== -1)
+    .sort((a, b) => b - a);
+  if (rowIndexes.length === 0) return 0;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: rowIndexes.map(index => ({
+        deleteDimension: { range: { sheetId: tabId, dimension: 'ROWS', startIndex: index, endIndex: index + 1 } },
+      })),
+    },
+  });
+  return rowIndexes.length;
+}
+
 // ---------- Daily email scan ----------
 async function runEmailScan() {
   const candidates = await scanInbox(getOAuthClient());
@@ -149,6 +172,23 @@ app.post('/api/pending/:id/approve', async (req, res) => {
 app.post('/api/pending/:id/reject', async (req, res) => {
   try { await removePendingRowById(req.params.id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/api/pending/bulk/:action', async (req, res) => {
+  try {
+    const { action } = req.params;
+    const requestedIds = req.body && req.body.ids;
+    if (!['approve', 'reject'].includes(action)) return res.status(400).json({ ok: false, error: 'Action must be approve or reject.' });
+    if (!Array.isArray(requestedIds) || requestedIds.length === 0 || requestedIds.some(id => typeof id !== 'string')) {
+      return res.status(400).json({ ok: false, error: 'Provide one or more pending item IDs.' });
+    }
+    const ids = [...new Set(requestedIds)];
+    const pendingRows = await getPendingRows();
+    const selectedRows = pendingRows.filter(row => ids.includes(row.id));
+    if (selectedRows.length === 0) return res.status(404).json({ ok: false, error: 'No selected pending items were found.' });
+    if (action === 'approve') await applyCandidatesDirectly(selectedRows);
+    const processed = await removePendingRowsByIds(selectedRows.map(row => row.id));
+    res.json({ ok: true, processed, missing: ids.length - selectedRows.length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.post('/api/scan-now', async (req, res) => {
   try { await runEmailScan(); res.json({ ok: true }); }

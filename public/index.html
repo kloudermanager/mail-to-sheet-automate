@@ -45,6 +45,10 @@
   .empty{padding:50px 20px;text-align:center;color:var(--muted)}
   .vendor{color:var(--accent2);font-weight:500}
   .rowActions button{margin-right:6px}
+  .bulkActions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);border-bottom:0;border-radius:14px 14px 0 0;background:var(--panel2)}
+  .bulkActions .selectionCount{color:var(--muted);font-size:13px;margin-right:auto}
+  .bulkActions button{border-radius:7px}
+  input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle;cursor:pointer}
 </style>
 </head>
 <body>
@@ -160,8 +164,11 @@ function AddItemCard({onAdded}){
 
 function App(){
   const [pending,setPending] = useState([]);
+  const [selectedIds,setSelectedIds] = useState([]);
   const [autoApply,setAutoApply] = useState(false);
   const [busyId,setBusyId] = useState(null);
+  const [bulkBusy,setBulkBusy] = useState(false);
+  const [bulkMessage,setBulkMessage] = useState(null);
   const [scanning,setScanning] = useState(false);
   const [scanError,setScanError] = useState('');
   const [theme,setTheme] = useState(()=>document.documentElement.getAttribute('data-theme')||'dark');
@@ -173,14 +180,38 @@ function App(){
 
   async function load(){
     const r = await fetch('/api/pending'); const j = await r.json();
-    if(j.ok){ setPending(j.rows||[]); setAutoApply(j.autoApply); }
+    if(j.ok){
+      const rows = j.rows||[];
+      setPending(rows); setAutoApply(j.autoApply);
+      setSelectedIds(current => current.filter(id => rows.some(row => row.id === id)));
+    }
   }
   useEffect(()=>{ load(); const iv=setInterval(load, 5*60*1000); return ()=>clearInterval(iv); }, []);
 
   async function act(id, verb){
     setBusyId(id);
-    try{ await fetch(`/api/pending/${id}/${verb}`, {method:'POST'}); await load(); }
+    try{ await fetch(`/api/pending/${id}/${verb}`, {method:'POST'}); setSelectedIds(current => current.filter(selectedId => selectedId !== id)); await load(); }
     finally{ setBusyId(null); }
+  }
+
+  function toggleSelected(id){
+    setSelectedIds(current => current.includes(id) ? current.filter(selectedId => selectedId !== id) : [...current,id]);
+  }
+
+  async function bulkAct(action){
+    if(selectedIds.length===0) return;
+    setBulkBusy(true); setBulkMessage(null);
+    try{
+      const r = await fetch(`/api/pending/bulk/${action}`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:selectedIds}),
+      });
+      const j = await r.json();
+      if(!r.ok || !j.ok) throw new Error(j.error || `Bulk action failed (${r.status})`);
+      setSelectedIds([]);
+      await load();
+      setBulkMessage({ok:true,text:`${j.processed} item${j.processed===1?'':'s'} ${action==='approve'?'approved':'rejected'}.${j.missing ? ` ${j.missing} no longer pending.` : ''}`});
+    }catch(e){ setBulkMessage({ok:false,text:e.message || 'Bulk action failed.'}); }
+    finally{ setBulkBusy(false); }
   }
 
   async function scanNow(){
@@ -213,24 +244,34 @@ function App(){
         ) : pending.length===0 ? (
           <div className="empty">No pending rate emails to review.</div>
         ) : (
-          <div className="tablewrap">
+          <React.Fragment>
+          <div className="bulkActions">
+            <label><input type="checkbox" aria-label="Select all pending items" checked={pending.length>0 && selectedIds.length===pending.length} onChange={e=>setSelectedIds(e.target.checked ? pending.map(p=>p.id) : [])} disabled={bulkBusy || busyId!==null} /></label>
+            <span className="selectionCount">{selectedIds.length} selected</span>
+            <button onClick={()=>bulkAct('approve')} disabled={selectedIds.length===0 || bulkBusy || busyId!==null}>{bulkBusy ? 'Working...' : 'Approve selected'}</button>
+            <button className="reject" onClick={()=>bulkAct('reject')} disabled={selectedIds.length===0 || bulkBusy || busyId!==null}>{bulkBusy ? 'Working...' : 'Reject selected'}</button>
+          </div>
+          {bulkMessage && <div className={'msg '+(bulkMessage.ok?'ok':'err')} role="status">{bulkMessage.text}</div>}
+          <div className="tablewrap" style={{borderTopLeftRadius:0,borderTopRightRadius:0}}>
             <table>
-              <thead><tr><th>Country</th><th>MCC</th><th>MNC</th><th>Rate</th><th>Bind</th><th>Operator</th><th>Date</th><th>Vendor</th><th>Source</th><th>Actions</th></tr></thead>
+              <thead><tr><th aria-label="Select item"></th><th>Country</th><th>MCC</th><th>MNC</th><th>Rate</th><th>Bind</th><th>Operator</th><th>Date</th><th>Vendor</th><th>Source</th><th>Actions</th></tr></thead>
               <tbody>
                 {pending.map(p=>(
                   <tr key={p.id}>
+                    <td><input type="checkbox" aria-label={`Select ${p.country} from ${p.vendor}`} checked={selectedIds.includes(p.id)} onChange={()=>toggleSelected(p.id)} disabled={bulkBusy || busyId!==null} /></td>
                     <td>{p.country}</td><td>{p.mcc}</td><td>{p.mnc}</td><td>{p.rate}</td>
                     <td>{p.bind}</td><td>{p.operator}</td><td>{p.date}</td><td className="vendor">{p.vendor}</td>
                     <td style={{whiteSpace:'normal',maxWidth:260}}>{p.source}</td>
                     <td className="rowActions">
-                      <button disabled={busyId===p.id} onClick={()=>act(p.id,'approve')}>Approve</button>
-                      <button className="reject" disabled={busyId===p.id} onClick={()=>act(p.id,'reject')}>Reject</button>
+                      <button disabled={bulkBusy || busyId!==null} onClick={()=>act(p.id,'approve')}>Approve</button>
+                      <button className="reject" disabled={bulkBusy || busyId!==null} onClick={()=>act(p.id,'reject')}>Reject</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          </React.Fragment>
         )}
       </div>
     </React.Fragment>
